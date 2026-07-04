@@ -11,20 +11,30 @@ Default output_dir = assets/hunyuan_ocr.
 import sys, os, json, glob
 
 
-def find_snapshot():
+def find_snapshot(model_dir=None):
+    if model_dir and os.path.isdir(model_dir):
+        return model_dir
     cands = glob.glob(os.path.expanduser(
         '~/.cache/huggingface/hub/models--tencent--HunyuanOCR/snapshots/*'))
     if not cands:
-        raise SystemExit("HunyuanOCR HF snapshot not found in cache")
+        raise SystemExit("HunyuanOCR HF snapshot not found in cache. Pass model_dir as second argument.")
     return cands[0]
 
 
 def main():
+    # model_dir: CLI arg > env var > relative default (../hunyuanocrmodel from project root)
+    _model_default = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "hunyuanocrmodel"))
+    if len(sys.argv) >= 3:
+        model_dir = sys.argv[2]
+    else:
+        model_dir = os.environ.get("MODEL_PATH", _model_default)
+
     out_dir = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'assets', 'hunyuan_ocr')
     os.makedirs(out_dir, exist_ok=True)
 
-    snap = find_snapshot()
+    snap = find_snapshot(model_dir)
     tj = json.load(open(os.path.join(snap, 'tokenizer.json'), encoding='utf-8'))
     tc = json.load(open(os.path.join(snap, 'tokenizer_config.json'), encoding='utf-8'))
 

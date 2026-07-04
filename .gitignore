@@ -5,7 +5,8 @@ models/*.bin
 scripts/ncnn/*.bin
 scripts/ncnn/*.pt
 scripts/ts/*.pt
-scripts/ts_pnnx/*.pt
+scripts/ts/*.bin
+scripts/ts_pnnx/*
 
 # Pre-computed position embeddings (regenerate)
 scripts/ncnn/pos_embed*.bin
@@ -21,3 +22,14 @@ build/
 # Temp
 *.tmp
 *.bak
+*.nokv
+__pycache__/
+HF_README.md
+
+# pnnx intermediate artifacts
+scripts/ncnn/*.onnx
+scripts/ncnn/*.pnnx.*
+scripts/ncnn/*_pnnx.py
+scripts/ncnn/*_ncnn.py
+scripts/ncnn/vision_encoder.ncnn.*
+scripts/ncnn/vision_encoder.pt

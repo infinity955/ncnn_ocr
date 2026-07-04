@@ -2,7 +2,9 @@
 
 > 仓库: https://github.com/infinity955/ncnn_ocr
 
-腾讯 HunYuanOCR（1B OCR 专家模型）纯 ncnn C++ 推理。0 自定义层，动态分辨率，KV cache。
+> 模型: https://huggingface.co/infinity955/ncnn_ocr
+
+腾讯 HunYuanOCR（1B OCR模型）纯 ncnn C++ 推理。0 自定义层，动态分辨率，KV cache。
 
 文字输出与 PyTorch HF 完全一致，坐标差 2-6 px（见[注意事项](#注意事项)）。
 
@@ -29,15 +31,21 @@ models/
 
 ### 1.1 克隆 ncnn 源码
 
+将 ncnn 克隆到**项目同级目录**下：
+
 ```bash
-git clone https://github.com/Tencent/ncnn.git
+cd .. && git clone https://github.com/Tencent/ncnn.git && cd ncnn_ocr
+# 最终目录结构:  YourProject/
+#               ├── ncnn/              ← ncnn 源码
+#               ├── ncnn_ocr/          ← 本项目
+#               └── hunyuanocrmodel/   ← 下一步下载的模型
 ```
 
 ### 1.2 搭建 Python 环境
 
 ```bash
 # Python 3.10+
-pip install torch==2.12.1 numpy pillow
+pip install torch==2.12.1 torchvision numpy pillow accelerate huggingface_hub
 pip install "git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4"
 pip install pnnx==20260526
 ```
@@ -46,8 +54,10 @@ pip install pnnx==20260526
 |-----|------|
 | Python | 3.10.18 |
 | torch | 2.12.1 |
+| torchvision | 0.27.1 |
 | transformers | 4.57.1 (commit `82a06db`) |
 | pnnx | 20260526 |
+| accelerate | 1.14.0 |
 | numpy | 2.4.2 |
 | pillow | 10.4.0 |
 
@@ -56,7 +66,6 @@ pip install pnnx==20260526
 从 HuggingFace：
 
 ```bash
-pip install huggingface_hub
 huggingface-cli download tencent/HunyuanOCR --local-dir ../hunyuanocrmodel
 ```
 
@@ -66,6 +75,8 @@ huggingface-cli download tencent/HunyuanOCR --local-dir ../hunyuanocrmodel
 pip install modelscope
 python -c "from modelscope import snapshot_download; snapshot_download('tencent/HunyuanOCR', local_dir='../hunyuanocrmodel')"
 ```
+
+> 脚本会自动从项目根目录推导 `../hunyuanocrmodel/`。若下载到其他位置，可设 `MODEL_PATH` 环境变量或直接修改脚本中的 `MODEL` 变量。
 
 ---
 
@@ -87,6 +98,7 @@ ts/vision_encoder.pt    # ViT
 ts/text_embed.pt        # Text Embed
 ts/decoder.pt           # 24 层 Decoder
 ts/lm_head.pt           # LM Head
+ts/pos_embed.bin        # 位置嵌入基坐标 (1152,128,128) float32
 ```
 
 ### 2.2 精度验证（可选）
@@ -108,11 +120,13 @@ PYTHONUTF8=1 python trace_export.py
 
 ### 2.4 pnnx → ncnn
 
+> 所有 pnnx CLI 命令请在 **`scripts/ncnn/`** 目录下运行，确保输出文件位置正确。
+
 **ViT**（两种分辨率实现动态 H/W）：
 
 ```bash
 PYTHONUTF8=1 python export_vision_ncnn.py
-# → ncnn/vision.ncnn.{param,bin}
+# → ncnn/vision_encoder.ncnn.{param,bin}  （之后需重命名为 vision.ncnn.*）
 #    inputshape = [1,3,?,?]f32,[1,1152,?,?]f32
 ```
 
@@ -121,6 +135,7 @@ PYTHONUTF8=1 python export_vision_ncnn.py
 ```bash
 cd ncnn
 pnnx ../ts_pnnx/decoder.pt \
+  ncnnparam=decoder.ncnn.param ncnnbin=decoder.ncnn.bin \
   inputshape=[1,8,1024],[1,1,8,8],[1,8,64],[1,8,64] \
   inputshape2=[1,16,1024],[1,1,16,16],[1,16,64],[1,16,64] \
   fp16=0 optlevel=2
@@ -131,6 +146,7 @@ pnnx ../ts_pnnx/decoder.pt \
 
 ```bash
 pnnx ../ts_pnnx/text_embed.pt \
+  ncnnparam=text_embed.ncnn.param ncnnbin=text_embed.ncnn.bin \
   inputshape=[1,8]i64 inputshape2=[1,64]i64 fp16=0 optlevel=2
 # → text_embed.ncnn.{param,bin}
 ```
@@ -139,6 +155,7 @@ pnnx ../ts_pnnx/text_embed.pt \
 
 ```bash
 pnnx ../ts_pnnx/lm_head.pt \
+  ncnnparam=lm_head.ncnn.param ncnnbin=lm_head.ncnn.bin \
   inputshape=[1,8,1024]f32 inputshape2=[1,64,1024]f32 fp16=0 optlevel=2
 # → lm_head.ncnn.{param,bin}
 ```
@@ -148,28 +165,34 @@ pnnx ../ts_pnnx/lm_head.pt \
 ### 2.5 添加 KV Cache
 
 ```bash
-PYTHONUTF8=1 python hunyuan_ocr_add_kvcache.py
+PYTHONUTF8=1 python hunyuan_ocr_add_kvcache.py ncnn/decoder.ncnn.param
 ```
 
 修改 `decoder.ncnn.param`：每个 SDPA 增加 `cache_k/cache_v` 输入输出和 `7=1`。
-（732→733 层，971→1067 blob）
+（732→733 层，971→1067 blob）。同时会保存备份 `decoder.ncnn.param.nokv`。
 
 ### 2.6 生成 Tokenizer 文件
 
 ```bash
-PYTHONUTF8=1 python hunyuan_ocr_tokenizer.py
-# → vocab.txt（120818 行，行号 = token ID）
+PYTHONUTF8=1 python hunyuan_ocr_tokenizer.py ..
+# → ../vocab.txt（120818 行，行号 = token ID）
+# → ../merges.txt（119758 BPE merge 对）
 ```
 
 ### 2.7 复制模型到项目
 
 ```bash
-cp ncnn/vision.ncnn.{param,bin} ../hunyuanocr_ncnn/models/
-cp ncnn/text_embed.ncnn.{param,bin} ../hunyuanocr_ncnn/models/
-cp ncnn/decoder.ncnn.{param,bin} ../hunyuanocr_ncnn/models/
-cp ncnn/lm_head.ncnn.param ../hunyuanocr_ncnn/models/
-cp ncnn/pos_embed.bin ../hunyuanocr_ncnn/models/
-cp vocab.txt ../hunyuanocr_ncnn/
+# 重命名 vision_encoder → vision
+mv ncnn/vision_encoder.ncnn.param ncnn/vision.ncnn.param
+mv ncnn/vision_encoder.ncnn.bin   ncnn/vision.ncnn.bin
+
+# 复制到项目 models/（从 scripts/ 目录，.. = 项目根目录）
+cp ncnn/vision.ncnn.{param,bin}   ../models/
+cp ncnn/text_embed.ncnn.{param,bin} ../models/
+cp ncnn/decoder.ncnn.{param,bin}  ../models/
+cp ncnn/lm_head.ncnn.param        ../models/
+cp ts/pos_embed.bin               ../models/
+cp vocab.txt merges.txt           ../
 ```
 
 ---
@@ -179,27 +202,31 @@ cp vocab.txt ../hunyuanocr_ncnn/
 ### 3.1 编译 ncnn
 
 ```bash
-cd ncnn && mkdir build && cd build
-cmake .. && make -j
+cd ../ncnn && mkdir -p build && cd build
+cmake -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF .. && make -j4
+cmake --install . --config Release   # 安装到 build/install/
 ```
 
 Windows (MSVC)：
 ```powershell
-cmake -G "Visual Studio 17 2022" -A x64 ..
+cd ..\ncnn && mkdir build && cd build
+cmake -G "Visual Studio 17 2022" -A x64 -DNCNN_BUILD_TOOLS=OFF -DNCNN_BUILD_EXAMPLES=OFF ..
 cmake --build . --config Release -j
+cmake --install . --config Release
 ```
 
-### 3.2 编译 hunyuanocr_ncnn
+### 3.2 编译 ncnn_ocr
 
 ```bash
-cd hunyuanocr_ncnn && mkdir build && cd build
-cmake .. -Dncnn_DIR=<ncnn_root>/build/install/lib/cmake/ncnn
-make -j
+cd ../ncnn_ocr && mkdir -p build && cd build
+cmake .. -Dncnn_DIR=$(realpath ../ncnn/build/install/lib/cmake/ncnn)
+make -j4
 ```
 
 Windows (MSVC)：
 ```powershell
-cmake -G "Visual Studio 17 2022" -A x64 .. -DUSE_OPENMP=OFF
+cd ..\ncnn_ocr && mkdir build && cd build
+cmake -G "Visual Studio 17 2022" -A x64 .. -Dncnn_DIR=../ncnn/build/install/lib/cmake/ncnn -DUSE_OPENMP=OFF
 cmake --build . --config Release -j
 ```
 
@@ -208,7 +235,8 @@ cmake --build . --config Release -j
 ## 阶段四：运行
 
 ```bash
-./hunyuanocr_ncnn --model . --image test.jpg
+# 在项目根目录 (ncnn_ocr/) 运行
+./build/Release/hunyuanocr_ncnn --model . --image assets/testimg.jpg
 ```
 
 | 参数 | 说明 |
@@ -220,7 +248,7 @@ cmake --build . --config Release -j
 Windows PowerShell 中文乱码：
 ```powershell
 chcp 65001
-.\hunyuanocr_ncnn.exe --model . --image test.jpg
+.\build\Release\hunyuanocr_ncnn.exe --model . --image assets\testimg.jpg
 ```
 
 ---
@@ -256,37 +284,69 @@ LM Head（与 Text Embed 权重共享）→ logits (120818)
 
 ## 精度
 
-| 图片 | HF PyTorch | ncnn C++ |
-|------|-----------|----------|
-| testimg.jpg | `顺利上岸(233,395),(761,628)LAMAR...` | `顺利上岸(231,392),(764,632)LAMAR...` |
-| testimg2.jpg | `<pos_16><pos_121>P<USATRAVELER...` | `<pos_16><pos_121>P<USATRAVELER...` |
+**Python verify_modules.py**（逐模块 vs HF，testimg.jpg）：
 
-文字完全一致。坐标差 2-6 px（`size=` vs `scale_factor+0.1` 已知取舍）。
+| 模块 | maxabs | 状态 |
+|------|--------|------|
+| Vision Encoder | 2.815 | ✅ shape 匹配 |
+| Text Embed | 0.000 | ✅ 完美 |
+| Decoder | 3.671 | ✅ |
+| LM Head | 1.588 | ✅ |
+| **首 token argmax** | **120130 = 120130** | ✅ 一致 |
+
+**C++ ncnn 推理**（端到端）：
+
+| 图片 | 输出 |
+|------|------|
+| testimg.jpg | `顺利上岸(231,392),(764,632)LAMAR(446,850),(559,878)05483(934,835),(997,870)` |
+
+文字与 PyTorch HF 完全一致。
 
 ---
 
-## 注意事项
+## 注意事项 — 相对 futz12 原始脚本的改动
 
-以下两处是本仓库与 futz12 原版的**差异点**，已在代码中修复。
+基于 futz12 原始脚本（见 `ncnn_llm/scripts/`）。主要改动：
 
-**1. `int(gh)`/`int(gw)` 已移除 → 文件 `scripts/hyocr_modules_modify.py` 第 109 行。**
+### 1. 外部 pos_embed (`hyocr_modules_modify.py`)
 
-原始代码 `reshape(B, -1, int(gh), int(gw))` 中的 `int()` 会将 traced tensor 转为常量，双尺寸 pnnx 导出时崩溃。本仓库已去掉 `int()`：
+原始 `hyocr_modules.py` 将 `pos_base` buffer（`1,1152,128,128`，~75MB）存储在 VisionEncoder
+内部并自行插值。我们将其移到**模块外部**：
 ```python
-x = x.reshape(1, c, -1).permute(0, 2, 1)  # 用 -1，不用 h2*(w2+1)
+# 原始: VisionEncoder.forward(self, pixels)
+#   pos = F.interpolate(self.pos_base, size=[gh, gw], ...)
+#   x = x + pos
+
+# 我们的 modify 版: VisionEncoder.forward(self, pixels, pos_embed)
+#   x = x + pos_embed  # 由调用方预插值后传入
 ```
+这使得 `vision_encoder.pt` 减小约 75MB，且允许 C++ 驱动按每张图片的尺寸插值 `pos_embed`，
+精确匹配 HF 预处理。
 
-**2. Vision 注入前 `.clone()` → 文件 `hunyuan_ocr.cpp` 约 360 行。**
+### 2. pos_embed 保存/加载流程
 
-ncnn `Mat` 使用写时复制（COW）。`memcpy(embeds.row(pos), ...)` 绕过 COW 写入共享数据，text_embed Extractor 析构后数据释放导致 segfault。本仓库在修改前插入 `.clone()`：
+- `export_modules.py`: 从 HF 提取 pos_embed → 保存为 `pos_embed.bin`（替代复制到内部 buffer）
+- `verify_modules.py`, `trace_export.py`, `export_vision_ncnn.py`: 加载 `pos_embed.bin`，插值到目标网格，传给 VisionEncoder
+
+### 3. LayerNorm 复制修复 (`export_modules.py`)
+
+原始代码 `cp(d.input_layernorm, s.input_layernorm)` 缺少 `bias=True`，导致 LayerNorm 的 bias
+参数被跳过。修复为 `cp(d.input_layernorm, s.input_layernorm, bias=True)`。
+
+### 4. 模型路径可配置
+
+`MODEL` 从 `"tencent/HunyuanOCR"`（HF Hub 下载）改为可配置的本地路径，避免每次运行重复下载。
+
+### 5. C++ COW 安全 (`hunyuan_ocr.cpp`)
+
+ncnn `Mat` 使用写时复制。`memcpy(embeds.row(pos), ...)` 绕过 COW 写入共享数据，
+Extractor 析构后释放可能导致 segfault。在修改前插入 `.clone()`（与 futz12 `ncnn_llm_ocr.cpp` 模式相同）：
 ```cpp
-text_embeds = text_embeds.clone();  // ← 这一行
-for (int i = 0; i < num_vision_tokens; i++) {
+text_embeds = text_embeds.clone();
+for (int i = 0; i < num_vision_tokens; i++)
     memcpy(text_embeds.row(image_positions[i]), image_embeds.row(i),
            hidden_size_ * sizeof(float));
-}
 ```
-`generate()` 函数中（约 530 行）的 re-injection 有同样的 `.clone()` 处理。
 
 ---
 

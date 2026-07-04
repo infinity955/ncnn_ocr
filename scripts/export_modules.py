@@ -7,11 +7,15 @@ for _s in (sys.stdout, sys.stderr):
         pass
 import os
 import torch
+import torch.nn.functional as F
 from transformers import HunYuanVLForConditionalGeneration
 
 import hyocr_modules_modify as M
 
-MODEL = "d:/MySystem/share/SummerNcnn/pnnx/hunyuanocrmodel"
+# MODEL_PATH env var overrides; default: ../hunyuanocrmodel relative to project root
+_MODEL_DEFAULT = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "hunyuanocrmodel"))
+MODEL = os.environ.get("MODEL_PATH", _MODEL_DEFAULT)
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts")
 os.makedirs(OUT, exist_ok=True)
 
@@ -34,8 +38,11 @@ def main():
     vis = M.VisionEncoder().eval()
     cp(vis.patch_embedding, vit.embeddings.patch_embedding, bias=True)
     pe = vit.embeddings.position_embedding.weight[1:, :]  # (16384,1152)
-    edge = vis.pos_base.shape[-1]
-    vis.pos_base.data.copy_(pe.reshape(1, edge, edge, vis.hidden).permute(0, 3, 1, 2).contiguous())
+    edge = 128  # sqrt(16384)
+    pos_base = pe.reshape(edge, edge, vis.hidden).permute(2, 0, 1).contiguous()  # (1152,128,128)
+    pos_file = os.path.join(OUT, "pos_embed.bin")
+    pos_base.numpy().tofile(pos_file)
+    print(f"  saved pos_embed {tuple(pos_base.shape)} -> {pos_file}")
     for i, (d, s) in enumerate(zip(vis.layers, vit.layers)):
         cp(d.self_attn.q_proj, s.self_attn.q_proj)
         cp(d.self_attn.k_proj, s.self_attn.k_proj)
@@ -81,7 +88,9 @@ def main():
     # ---------- quick eager sanity ----------
     print("[info] eager sanity forward ...")
     px = torch.randn(1, 3, 64, 96)
-    vout = vis(px); print("  vision:", tuple(vout.shape))
+    # pos_embed must match patch grid: gh=H/16, gw=W/16
+    ppos = F.interpolate(pos_base.unsqueeze(0), size=[4, 6], mode="bilinear", align_corners=False)
+    vout = vis(px, ppos); print("  vision:", tuple(vout.shape))
     ids = torch.randint(0, 120818, (1, 20))
     eout = emb(ids); print("  embed :", tuple(eout.shape))
     L = 20

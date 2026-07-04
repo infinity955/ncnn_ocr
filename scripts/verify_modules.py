@@ -8,16 +8,45 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 import os
+import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from transformers import AutoProcessor, HunYuanVLForConditionalGeneration
 import hyocr_modules_modify as M
 
-MODEL = "d:/MySystem/share/SummerNcnn/pnnx/hunyuanocrmodel"
+# MODEL_PATH env var overrides; default: ../hunyuanocrmodel relative to project root
+_MODEL_DEFAULT = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "hunyuanocrmodel"))
+MODEL = os.environ.get("MODEL_PATH", _MODEL_DEFAULT)
 TS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ts")
-IMG = "../hunyuanocr_ncnn/assets/testimg.jpg"
+IMG = "../assets/testimg.jpg"
 PROMPT = "检测并识别图片中的文字，将文本坐标格式化输出。"
 IMAGE_TOKEN = 120120
+
+
+def load_pos_embed():
+    """Load base (1,1152,128,128) pos_embed, then interpolate to target grid."""
+    f = os.path.join(TS, "pos_embed.bin")
+    if os.path.exists(f):
+        base = torch.from_numpy(np.fromfile(f, dtype=np.float32)).reshape(1, 1152, 128, 128)
+    else:
+        # fallback: extract from HF model
+        hf = HunYuanVLForConditionalGeneration.from_pretrained(
+            MODEL, torch_dtype=torch.float32, attn_implementation="eager",
+            local_files_only=True, low_cpu_mem_usage=True
+        ).eval()
+        pe = hf.vit.embeddings.position_embedding.weight[1:, :]
+        base = pe.reshape(128, 128, 1152).permute(2, 0, 1).unsqueeze(0).contiguous()
+        del hf
+    return base
+
+
+def pos_for(gh, gw):
+    """Interpolate pos_embed to (1,1152,gh,gw)."""
+    return F.interpolate(_POS_BASE, size=[gh, gw], mode="bilinear", align_corners=False)
+
+_POS_BASE = None  # initialized in main()
 
 
 def diff(a, b):
@@ -27,6 +56,10 @@ def diff(a, b):
 
 @torch.no_grad()
 def main():
+    global _POS_BASE
+    _POS_BASE = load_pos_embed()
+    print(f"[info] pos_embed loaded: {tuple(_POS_BASE.shape)}")
+
     proc = AutoProcessor.from_pretrained(MODEL, use_fast=False, local_files_only=True)
     hf = HunYuanVLForConditionalGeneration.from_pretrained(
         MODEL, torch_dtype=torch.float32, attn_implementation="eager", local_files_only=True
@@ -55,7 +88,7 @@ def main():
     print("\n===== per-module vs HF =====")
     # 1) vision
     pixels = M.image_from_pixel_values(pv, gh, gw)      # (1,3,H,W)
-    my_vis = vis(pixels)
+    my_vis = vis(pixels, pos_for(gh, gw))
     hf_vis = hf.vit(pv, inp["image_grid_thw"])
     print(f"[vision] my={tuple(my_vis.shape)} hf={tuple(hf_vis.shape)} maxabs={diff(my_vis, hf_vis):.3e}")
 
@@ -87,7 +120,8 @@ def main():
     # ---- dynamic shape checks ----
     print("\n===== dynamic checks =====")
     for (h, w) in [(64, 96), (96, 64), (128, 128)]:
-        o = vis(torch.randn(1, 3, h, w))
+        gh, gw = h // 16, w // 16
+        o = vis(torch.randn(1, 3, h, w), pos_for(gh, gw))
         print(f"[vision dyn] {h}x{w} -> {tuple(o.shape)}")
     for n in [5, 37, 128]:
         c, s = M.build_cos_sin(torch.arange(n).reshape(1, 1, n).repeat(1, 4, 1))
