@@ -1,0 +1,23 @@
+# Model binaries (distribute via Releases)
+models/*.bin
+
+# Export artifacts (intermediate files, regenerate with scripts)
+scripts/ncnn/*.bin
+scripts/ncnn/*.pt
+scripts/ts/*.pt
+scripts/ts_pnnx/*.pt
+
+# Pre-computed position embeddings (regenerate)
+scripts/ncnn/pos_embed*.bin
+
+# Build output
+build/
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# Temp
+*.tmp
+*.bak
