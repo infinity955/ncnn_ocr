@@ -1,0 +1,62 @@
+{
+  "model_type": "glm_ocr",
+  "params": {
+    "vision_param": "models/glm_vision.ncnn.param",
+    "vision_bin": "models/glm_vision.ncnn.bin",
+    "text_embed_param": "models/glm_text_embed.ncnn.param",
+    "text_embed_bin": "models/glm_text_embed.ncnn.bin",
+    "text_decoder_param": "models/glm_decoder.ncnn.param",
+    "text_decoder_bin": "models/glm_decoder.ncnn.bin",
+    "lm_head_param": "models/glm_lm_head.ncnn.param",
+    "lm_head_bin": "models/glm_lm_head.ncnn.bin"
+  },
+  "tokenizer": {
+    "type": "bbpe",
+    "vocab_file": "vocab.txt",
+    "merges_file": "merges.txt",
+    "eos": "<|endoftext|>",
+    "eos_ids": [59246, 59253],
+    "additional_special_tokens": [
+      "<|endoftext|>",
+      "<|user|>",
+      "<|assistant|>",
+      "<|image|>",
+      "<|begin_of_image|>",
+      "<|end_of_image|>",
+      "[gMASK]",
+      "<sop>",
+      "<eop>"
+    ]
+  },
+  "setting": {
+    "model_type": "glm_ocr",
+    "attn_cnt": 16,
+    "hidden_size": 1536,
+    "head_dim": 128,
+    "rope": {
+      "type": "mRoPE",
+      "rope_theta": 10000.0,
+      "rope_head_dim": 128,
+      "mrope_section": [16, 24, 24]
+    },
+    "image_token_id": 59280,
+    "vision": {
+      "patch_size": 14,
+      "spatial_merge_size": 2,
+      "vision_hidden_size": 1024,
+      "vision_head_dim": 64,
+      "vision_num_heads": 16,
+      "rope": {
+        "type": "mRoPE",
+        "rope_theta": 10000.0,
+        "rope_head_dim": 32,
+        "mrope_section": [16, 16]
+      },
+      "max_num_patches": 3432,
+      "min_pixels": 12544,
+      "max_pixels": 9633792,
+      "image_mean": [0.48145466, 0.4578275, 0.40821073],
+      "image_std": [0.26862954, 0.26130258, 0.27577711]
+    }
+  }
+}

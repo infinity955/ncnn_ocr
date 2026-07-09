@@ -1,5 +1,7 @@
 # Model binaries (distribute via Releases)
 models/*.bin
+assets/glm_ocr
+assets/paddleocr_vl
 
 # Export artifacts (intermediate files, regenerate with scripts)
 scripts/ncnn/*.bin
@@ -9,10 +11,15 @@ scripts/ts/*.bin
 scripts/ts_pnnx/*
 
 # Pre-computed position embeddings (regenerate)
-scripts/ncnn/pos_embed*.bin
+scripts/ncnn/*.bin
 
 # Build output
 build/
+docs/
+.venv/
+.venv-glm/
+.venv-paddle/
+models/
 
 # IDE
 .vs/
@@ -25,6 +32,11 @@ build/
 *.nokv
 __pycache__/
 HF_README.md
+.gitignore
+*.pt
+*.bin
+*.param
+*.onnx
 
 # pnnx intermediate artifacts
 scripts/ncnn/*.onnx

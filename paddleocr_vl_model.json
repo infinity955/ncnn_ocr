@@ -1,0 +1,61 @@
+{
+  "model_type": "paddleocr_vl",
+  "params": {
+    "vision_param": "models/pdvl_vision.ncnn.param",
+    "vision_bin": "models/pdvl_vision.ncnn.bin",
+    "text_embed_param": "models/pdvl_text_embed.ncnn.param",
+    "text_embed_bin": "models/pdvl_text_embed.ncnn.bin",
+    "text_decoder_param": "models/pdvl_decoder.ncnn.param",
+    "text_decoder_bin": "models/pdvl_decoder.ncnn.bin",
+    "lm_head_param": "models/pdvl_lm_head.ncnn.param",
+    "lm_head_bin": "models/pdvl_lm_head.ncnn.bin",
+    "pos_embed": "models/pdvl_pos_embed.bin"
+  },
+  "tokenizer": {
+    "type": "sp",
+    "vocab_file": "vocab.txt",
+    "merges_file": "merges.txt",
+    "eos": "</s>",
+    "eos_ids": [2],
+    "additional_special_tokens": ["<|IMAGE_START|>", "<|IMAGE_PLACEHOLDER|>", "<|IMAGE_END|>", "<|begin_of_sentence|>"]
+  },
+  "setting": {
+    "model_type": "paddleocr_vl",
+    "attn_cnt": 18,
+    "hidden_size": 1024,
+    "head_dim": 128,
+    "n_q": 16,
+    "n_kv": 2,
+    "rope": {
+      "type": "mRoPE",
+      "rope_theta": 500000.0,
+      "rope_head_dim": 128,
+      "mrope_section": [16, 24, 24]
+    },
+    "image_token_id": 100295,
+    "vision_start_token_id": 101305,
+    "vision_end_token_id": 101306,
+    "vision": {
+      "patch_size": 14,
+      "spatial_merge_size": 2,
+      "temporal_patch_size": 2,
+      "vision_hidden_size": 1152,
+      "vision_depth": 27,
+      "vision_head_dim": 72,
+      "vision_num_heads": 16,
+      "out_hidden_size": 1024,
+      "pos_embed_base_grid": 27,
+      "rope": {
+        "type": "2d",
+        "rope_theta": 10000.0,
+        "rope_head_dim": 36,
+        "mrope_section": [18, 18]
+      },
+      "image_size": 384,
+      "min_pixels": 101920,
+      "max_pixels": 1003520,
+      "image_mean": [0.48145466, 0.4578275, 0.40821073],
+      "image_std": [0.26862954, 0.26130258, 0.27577711]
+    }
+  }
+}
